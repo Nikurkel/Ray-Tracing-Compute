@@ -7,10 +7,14 @@ Texture2D<float4> _SkyboxTexture;
 SamplerState sampler_SkyboxTexture;
 static const float PI = 3.14159265f;
 float2 _PixelOffset;
+int _MaxReflections;
+float4 _DirectionalLight;
 
 struct Ray{
     float3 origin;
     float3 direction;
+
+    float3 energy;
 };
 
 struct RayHit{
@@ -23,6 +27,8 @@ Ray CreateRay(float3 origin, float3 direction){
     Ray ray;
     ray.origin = origin;
     ray.direction = direction;
+
+    ray.energy = float3(1.0f, 1.0f, 1.0f);
     return ray;
 }
 
@@ -77,14 +83,39 @@ void IntersectSphere(Ray ray, inout RayHit bestHit, float4 sphere){
 RayHit Trace(Ray ray){
     RayHit bestHit = CreateRayHit();
     IntersectGroundPlane(ray, bestHit);
-    IntersectSphere(ray, bestHit, float4(0, 3.0f, 0, 1.0f));
+    for (int i = 0; i < 10; i += 1){
+        for (int j = 0; j < 10; j += 1){
+            IntersectSphere(ray, bestHit, float4(i * 20, 4, j * 10, 4));
+        }
+    }
     return bestHit;
 }
 
 float3 Shade(inout Ray ray, RayHit hit){
     if(hit.distance < 1.#INF){
-        return hit.normal * 0.5f + 0.5f;
+        // float3 specular = float3(1.0f, 0.78f, 0.34f); // gold
+        float3 specular = float3(0.06f, 0.06f, 0.06f);
+        float3 albedo = float3(0.8f, 0.8f, 0.8f);
+
+        // Reflect the ray and multiply energy with specular reflection
+        ray.origin = hit.position + hit.normal * 0.001f;
+        ray.direction = reflect(ray.direction, hit.normal);
+        ray.energy *= specular;
+
+        // Shadow test ray
+        bool shadow = false;
+        Ray shadowRay = CreateRay(hit.position + hit.normal + 0.001f, -1 * _DirectionalLight.xyz);
+        RayHit shadowHit = Trace(shadowRay);
+        if(shadowHit.distance != 1.#INF){
+            return float3(0,0,0);
+        }
+
+        return saturate(dot(hit.normal, _DirectionalLight.xyz) * -1) * _DirectionalLight.w * albedo;
     }else{
+        // Erase the ray's energy - the sky doesn't reflect anything
+        ray.energy = 0.0f;
+
+        // Sample the skybox and write it
         float theta = acos(ray.direction.y) / -PI;
         float phi = atan2(ray.direction.x, -ray.direction.z) / -PI * 0.5f;
         return _SkyboxTexture.SampleLevel(sampler_SkyboxTexture, float2(phi, theta), 0).xyz;
@@ -105,8 +136,15 @@ void CSMain (uint3 id : SV_DispatchThreadID)
     Ray ray = CreateCameraRay(uv);
 
     // Trace and shade
-    RayHit hit = Trace(ray);
-    float3 result = Shade(ray, hit);
-    Result[id.xy] = float4(result, 1);
+    float3 result = float3(0, 0, 0);
+    for( int i = 0; i < 1 + _MaxReflections; i++){
+        RayHit hit = Trace(ray);
+        result += ray.energy * Shade(ray, hit);
+
+        if(!any(ray.energy)){
+            break;
+        }
+    }
     
+    Result[id.xy] = float4(result, 1);
 }

@@ -8,6 +8,8 @@
     {
         // No culling or depth
         Cull Off ZWrite Off ZTest Always
+
+        // Blend samples
         Blend SrcAlpha OneMinusSrcAlpha
 
         Pass
@@ -44,6 +46,7 @@
             float _Sample;
 
             float4 frag (v2f i) : SV_Target{
+                // change frame based on weighted impact: 1/sampleCount
                 return float4(tex2D(_MainTex, i.uv).rgb, 1.0f / (_Sample + 1.0f));
             }
 
